@@ -171,7 +171,8 @@ function makeLottoState(numPlayers, numRounds) {
 
 /* ---------- Nullschuss (Spiel 4) config ---------- */
 const NULL_START_OPTIONS = [401, 301, 201];
-const NULL_ARROWS_PER_TURN = 3;
+const MIN_NULL_ARROWS = 1;
+const MAX_NULL_ARROWS = 10;
 
 function defaultNames(n) {
   return Array.from({ length: n }, (_, i) => `Spieler ${i + 1}`);
@@ -205,6 +206,7 @@ let state = {
 
   // nullschuss game
   nullStartScore: 401,
+  nullArrowsPerTurn: 3,
   nullScores: [],
   nullActive: 0,
   nullTurnArrows: [],
@@ -373,6 +375,11 @@ function renderSetup() {
             `).join('')}
           </div>
         </div>
+        <label class="block mb-6">
+          <span class="text-sm font-medium text-ink/70 mb-1 block">Pfeile pro Zug</span>
+          <input type="number" id="num-null-arrows-input" value="${state.nullArrowsPerTurn}" min="${MIN_NULL_ARROWS}" max="${MAX_NULL_ARROWS}"
+            class="w-full h-12 px-4 rounded-xl border-2 border-gold/40 focus:border-gold outline-none text-base font-medium">
+        </label>
       ` : ''}
       ${!isPoints && !isLotto && !isNull ? '<div class="mb-2"></div>' : ''}
       <button data-action="start-game"
@@ -758,8 +765,8 @@ function renderNullTurnCard() {
     <div class="bg-white rounded-2xl border-2 border-${c.name} p-4">
       <p class="font-display text-lg text-${c.name} mb-1">${escapeHtml(state.playerNames[p])} ist am Zug</p>
       <p class="text-xs text-ink/50 mb-3">Rest nach diesem Zug: <span class="font-display text-base text-${c.name}">${running}</span></p>
-      <div class="flex gap-2 mb-4">
-        ${[0, 1, 2].map(i => `
+      <div class="flex flex-wrap gap-2 mb-4">
+        ${Array.from({ length: state.nullArrowsPerTurn }).map((_, i) => `
           <div class="arrow-slot border-2 ${arrows[i] !== undefined ? `bg-${c.name} border-${c.name} text-white` : `border-${c.name} bg-${c.light} text-${c.name}`}">
             ${arrows[i] !== undefined ? arrows[i] : '–'}
           </div>
@@ -822,6 +829,7 @@ function resetToStart() {
   state.lottoRound = 0;
   state.lottoHistory = [];
   state.nullStartScore = 401;
+  state.nullArrowsPerTurn = 3;
   state.nullScores = [];
   state.nullActive = 0;
   state.nullTurnArrows = [];
@@ -903,6 +911,11 @@ document.getElementById('app').addEventListener('click', (e) => {
       state.lottoHistory = [];
       state.screen = 'game-lotto';
     } else if (state.mode === 'null') {
+      const nullArrowsInput = document.getElementById('num-null-arrows-input');
+      let numNA = parseInt(nullArrowsInput.value, 10);
+      if (!numNA || numNA < MIN_NULL_ARROWS) numNA = MIN_NULL_ARROWS;
+      if (numNA > MAX_NULL_ARROWS) numNA = MAX_NULL_ARROWS;
+      state.nullArrowsPerTurn = numNA;
       state.nullScores = new Array(state.numPlayers).fill(state.nullStartScore);
       state.nullActive = 0;
       state.nullTurnArrows = [];
@@ -1061,7 +1074,7 @@ document.getElementById('app').addEventListener('click', (e) => {
     } else if (running === 0) {
       state.nullScores[p] = 0;
       state.nullWinner = p;
-    } else if (state.nullTurnArrows.length === NULL_ARROWS_PER_TURN) {
+    } else if (state.nullTurnArrows.length === state.nullArrowsPerTurn) {
       state.nullScores[p] = running;
       state.nullTurnArrows = [];
       state.nullActive = (p + 1) % state.numPlayers;
