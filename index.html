@@ -169,15 +169,19 @@ function makeLottoState(numPlayers, numRounds) {
   };
 }
 
+/* ---------- Nullschuss (Spiel 4) config ---------- */
+const NULL_START_OPTIONS = [401, 301, 201];
+const NULL_ARROWS_PER_TURN = 3;
+
 function defaultNames(n) {
   return Array.from({ length: n }, (_, i) => `Spieler ${i + 1}`);
 }
 
 /* ---------- Global state ---------- */
 let state = {
-  screen: 'player-count', // 'player-count' | 'mode' | 'setup' | 'game-tree' | 'game-points' | 'game-lotto'
+  screen: 'player-count', // 'player-count' | 'mode' | 'setup' | 'game-tree' | 'game-points' | 'game-lotto' | 'game-null'
   numPlayers: 2,
-  mode: null, // 'tree' | 'points' | 'lotto'
+  mode: null, // 'tree' | 'points' | 'lotto' | 'null'
   playerNames: defaultNames(2),
   numArrows: 3,
   numRoundsLotto: 3,
@@ -198,6 +202,15 @@ let state = {
   lottoScores: [],
   lottoRound: 0,
   lottoHistory: [],
+
+  // nullschuss game
+  nullStartScore: 401,
+  nullScores: [],
+  nullActive: 0,
+  nullTurnArrows: [],
+  nullWinner: null,
+  nullHistory: [],
+  nullBustMessage: null,
 };
 
 function isTreeComplete(tree) {
@@ -241,6 +254,7 @@ function render() {
   else if (state.screen === 'game-tree') app.innerHTML = renderTreeGame();
   else if (state.screen === 'game-points') app.innerHTML = renderPointsGame();
   else if (state.screen === 'game-lotto') app.innerHTML = renderLottoGame();
+  else if (state.screen === 'game-null') app.innerHTML = renderNullGame();
 }
 
 /* ---------- Player count select ---------- */
@@ -284,19 +298,35 @@ function renderModeSelect() {
     </button>
 
     <button data-action="pick-mode" data-mode="lotto"
-      class="w-full text-left bg-white rounded-2xl border-2 border-parchment2 p-5 active:scale-[0.98] transition-transform">
+      class="w-full text-left bg-white rounded-2xl border-2 border-parchment2 p-5 mb-4 active:scale-[0.98] transition-transform">
       <p class="font-display text-2xl text-pinedark mb-1">🎲 Zahlenlotto</p>
       <p class="text-sm text-ink/60 leading-relaxed">Pro Runde lost die App 3 Zahlen zwischen 1–10 aus (Wiederholungen möglich). Mit 3 Pfeilen versucht ihr, sie zu treffen: 1 Treffer = 1 Pkt, 2 Treffer = 3 Pkt, alle 3 = 5 Pkt. Meiste Punkte gewinnen.</p>
+    </button>
+
+    <button data-action="pick-mode" data-mode="null"
+      class="w-full text-left bg-white rounded-2xl border-2 border-parchment2 p-5 active:scale-[0.98] transition-transform">
+      <p class="font-display text-2xl text-pinedark mb-1">🎯 Nullschuss</p>
+      <p class="text-sm text-ink/60 leading-relaxed">Start bei 401, 301 oder 201 Punkten. Jeder Pfeil zieht Punkte ab – wer zuerst exakt auf 0 trifft, gewinnt. Wer die 0 überschießt, dessen Zug verfällt.</p>
     </button>
   `;
 }
 
 /* ---------- Setup ---------- */
+function syncPlayerNamesFromInputs() {
+  const inputs = document.querySelectorAll('[data-player-input]');
+  inputs.forEach(inp => {
+    const idx = parseInt(inp.dataset.playerInput, 10);
+    const val = inp.value.trim();
+    if (val) state.playerNames[idx] = val;
+  });
+}
+
 function renderSetup() {
   const isPoints = state.mode === 'points';
   const isLotto = state.mode === 'lotto';
-  const title = isLotto ? '🎲 Setup' : (isPoints ? '🏹 Setup' : '🎄 Setup');
-  const label = isLotto ? 'Zahlenlotto' : (isPoints ? 'Punktejagd' : 'Tannenbaum');
+  const isNull = state.mode === 'null';
+  const title = isLotto ? '🎲 Setup' : (isPoints ? '🏹 Setup' : (isNull ? '🎯 Setup' : '🎄 Setup'));
+  const label = isLotto ? 'Zahlenlotto' : (isPoints ? 'Punktejagd' : (isNull ? 'Nullschuss' : 'Tannenbaum'));
 
   return `
     <div class="pt-10 pb-6">
@@ -330,7 +360,21 @@ function renderSetup() {
             class="w-full h-12 px-4 rounded-xl border-2 border-gold/40 focus:border-gold outline-none text-base font-medium">
         </label>
       ` : ''}
-      ${!isPoints && !isLotto ? '<div class="mb-2"></div>' : ''}
+      ${isNull ? `
+        <div class="mb-6 mt-2">
+          <span class="text-sm font-medium text-ink/70 mb-2 block">Startpunktzahl</span>
+          <div class="flex gap-2">
+            ${NULL_START_OPTIONS.map(v => `
+              <button data-action="select-null-start" data-value="${v}"
+                class="flex-1 h-12 rounded-xl font-display text-base border-2 transition-colors
+                  ${state.nullStartScore === v ? 'bg-pine border-pine text-parchment' : 'bg-white border-parchment2 text-ink/60'}">
+                ${v}
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+      ${!isPoints && !isLotto && !isNull ? '<div class="mb-2"></div>' : ''}
       <button data-action="start-game"
         class="w-full h-13 py-3 rounded-xl bg-pine text-parchment font-display text-lg tracking-wide active:scale-[0.98] transition-transform">
         Spiel starten
@@ -655,6 +699,103 @@ function renderLottoPlayerCard(p, round) {
   `;
 }
 
+/* ---------- Nullschuss game ---------- */
+function renderNullGame() {
+  const n = state.numPlayers;
+  const canUndo = state.nullHistory.length > 0;
+  const winner = state.nullWinner;
+
+  return `
+    ${winner !== null ? renderNullWinnerBanner(winner) : ''}
+    ${state.nullBustMessage ? renderNullBustBanner() : ''}
+    <div class="sticky top-0 z-10 bg-parchment/95 backdrop-blur pt-4 pb-3 -mx-4 px-4 border-b border-parchment2">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2">
+          <button data-action="go-home" class="h-9 w-9 rounded-lg border-2 border-ink/15 flex items-center justify-center">🏠</button>
+          <p class="font-display text-2xl text-pinedark">Nullschuss</p>
+        </div>
+        <div class="flex gap-2">
+          <button data-action="undo-null" ${!canUndo ? 'disabled' : ''}
+            class="h-10 px-3 rounded-lg border-2 border-ink/15 text-sm font-medium flex items-center gap-1 ${!canUndo ? 'opacity-35' : 'active:scale-95'}">
+            ↺ Undo
+          </button>
+          <button data-action="reset-null"
+            class="h-10 px-3 rounded-lg border-2 border-ink/15 text-sm font-medium active:scale-95">
+            ⟲ Reset
+          </button>
+        </div>
+      </div>
+      <p class="text-xs font-medium text-ink/50 uppercase tracking-widest">Start: ${state.nullStartScore} Punkte</p>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5 mb-5">
+      ${[...Array(n).keys()].map(p => renderNullBoardCard(p)).join('')}
+    </div>
+
+    ${winner === null ? renderNullTurnCard() : ''}
+  `;
+}
+
+function renderNullBoardCard(p) {
+  const c = PLAYER_COLORS[p % PLAYER_COLORS.length];
+  const isActive = state.nullActive === p && state.nullWinner === null;
+  const isWinner = state.nullWinner === p;
+  return `
+    <div class="bg-white rounded-2xl border-2 ${isActive || isWinner ? `border-${c.name}` : 'border-parchment2'} p-4 flex items-center justify-between ${isActive || isWinner ? '' : 'tree-dim'}">
+      <p class="font-display text-lg text-${c.name}">${isActive ? '🎯 ' : ''}${isWinner ? '🏆 ' : ''}${escapeHtml(state.playerNames[p])}</p>
+      <p class="font-display text-3xl text-${c.name}">${state.nullScores[p]}</p>
+    </div>
+  `;
+}
+
+function renderNullTurnCard() {
+  const p = state.nullActive;
+  const c = PLAYER_COLORS[p % PLAYER_COLORS.length];
+  const arrows = state.nullTurnArrows;
+  const running = state.nullScores[p] - arrows.reduce((s, v) => s + v, 0);
+
+  return `
+    <div class="bg-white rounded-2xl border-2 border-${c.name} p-4">
+      <p class="font-display text-lg text-${c.name} mb-1">${escapeHtml(state.playerNames[p])} ist am Zug</p>
+      <p class="text-xs text-ink/50 mb-3">Rest nach diesem Zug: <span class="font-display text-base text-${c.name}">${running}</span></p>
+      <div class="flex gap-2 mb-4">
+        ${[0, 1, 2].map(i => `
+          <div class="arrow-slot border-2 ${arrows[i] !== undefined ? `bg-${c.name} border-${c.name} text-white` : `border-${c.name} bg-${c.light} text-${c.name}`}">
+            ${arrows[i] !== undefined ? arrows[i] : '–'}
+          </div>
+        `).join('')}
+      </div>
+      <p class="text-xs text-ink/50 mb-2">Pfeilwert eingeben:</p>
+      <div class="flex flex-wrap gap-2">
+        ${Array.from({ length: 11 }).map((_, val) => `
+          <button data-action="pick-null-arrow" data-value="${val}"
+            class="pick-btn border-2 border-${c.name} bg-${c.light} text-${c.name}">
+            ${val}
+          </button>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderNullWinnerBanner(p) {
+  return `
+    <div class="mt-4 rounded-2xl bg-pine text-parchment px-5 py-4 text-center pop-in">
+      <p class="font-display text-2xl">🏆 ${escapeHtml(state.playerNames[p])} gewinnt!</p>
+      <p class="text-sm text-parchment/80 mt-0.5">Exakt auf 0 getroffen.</p>
+    </div>
+  `;
+}
+
+function renderNullBustBanner() {
+  const p = state.nullBustMessage.player;
+  return `
+    <div class="mt-4 rounded-2xl px-5 py-3 text-center pop-in" style="background:#A93F3F;color:#fff;">
+      <p class="font-display text-lg">💥 Überschossen! Zug von ${escapeHtml(state.playerNames[p])} verfällt.</p>
+    </div>
+  `;
+}
+
 /* ---------- helpers ---------- */
 function escapeHtml(str) {
   const div = document.createElement('div');
@@ -680,6 +821,13 @@ function resetToStart() {
   state.lottoScores = [];
   state.lottoRound = 0;
   state.lottoHistory = [];
+  state.nullStartScore = 401;
+  state.nullScores = [];
+  state.nullActive = 0;
+  state.nullTurnArrows = [];
+  state.nullWinner = null;
+  state.nullHistory = [];
+  state.nullBustMessage = null;
 }
 
 /* ---------- events ---------- */
@@ -713,12 +861,17 @@ document.getElementById('app').addEventListener('click', (e) => {
     render();
   }
 
+  if (action === 'select-null-start') {
+    syncPlayerNamesFromInputs();
+    state.nullStartScore = parseInt(target.dataset.value, 10);
+    render();
+  }
+
   if (action === 'start-game') {
-    const inputs = document.querySelectorAll('[data-player-input]');
-    inputs.forEach(inp => {
+    syncPlayerNamesFromInputs();
+    document.querySelectorAll('[data-player-input]').forEach(inp => {
       const idx = parseInt(inp.dataset.playerInput, 10);
-      const val = inp.value.trim();
-      state.playerNames[idx] = val || `Spieler ${idx + 1}`;
+      if (!inp.value.trim()) state.playerNames[idx] = `Spieler ${idx + 1}`;
     });
 
     if (state.mode === 'tree') {
@@ -749,6 +902,14 @@ document.getElementById('app').addEventListener('click', (e) => {
       state.lottoRound = 0;
       state.lottoHistory = [];
       state.screen = 'game-lotto';
+    } else if (state.mode === 'null') {
+      state.nullScores = new Array(state.numPlayers).fill(state.nullStartScore);
+      state.nullActive = 0;
+      state.nullTurnArrows = [];
+      state.nullWinner = null;
+      state.nullHistory = [];
+      state.nullBustMessage = null;
+      state.screen = 'game-null';
     }
     render();
   }
@@ -872,6 +1033,60 @@ document.getElementById('app').addEventListener('click', (e) => {
       state.lottoScores = lotto.scores;
       state.lottoRound = 0;
       state.lottoHistory = [];
+      render();
+    }
+  }
+
+  /* --- nullschuss actions --- */
+  if (action === 'pick-null-arrow') {
+    state.nullBustMessage = null;
+    if (state.nullWinner !== null) return;
+    const value = parseInt(target.dataset.value, 10);
+
+    state.nullHistory.push(JSON.parse(JSON.stringify({
+      scores: state.nullScores,
+      active: state.nullActive,
+      turnArrows: state.nullTurnArrows,
+      winner: state.nullWinner,
+    })));
+
+    const p = state.nullActive;
+    state.nullTurnArrows.push(value);
+    const running = state.nullScores[p] - state.nullTurnArrows.reduce((s, v) => s + v, 0);
+
+    if (running < 0) {
+      state.nullBustMessage = { player: p };
+      state.nullTurnArrows = [];
+      state.nullActive = (p + 1) % state.numPlayers;
+    } else if (running === 0) {
+      state.nullScores[p] = 0;
+      state.nullWinner = p;
+    } else if (state.nullTurnArrows.length === NULL_ARROWS_PER_TURN) {
+      state.nullScores[p] = running;
+      state.nullTurnArrows = [];
+      state.nullActive = (p + 1) % state.numPlayers;
+    }
+    render();
+  }
+  if (action === 'undo-null') {
+    const last = state.nullHistory.pop();
+    if (last) {
+      state.nullScores = last.scores;
+      state.nullActive = last.active;
+      state.nullTurnArrows = last.turnArrows;
+      state.nullWinner = last.winner;
+      state.nullBustMessage = null;
+      render();
+    }
+  }
+  if (action === 'reset-null') {
+    if (confirm('Spiel wirklich zurücksetzen? Alle Punktestände gehen verloren.')) {
+      state.nullScores = new Array(state.numPlayers).fill(state.nullStartScore);
+      state.nullActive = 0;
+      state.nullTurnArrows = [];
+      state.nullWinner = null;
+      state.nullHistory = [];
+      state.nullBustMessage = null;
       render();
     }
   }
