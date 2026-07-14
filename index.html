@@ -30,6 +30,8 @@
           player4: '#7B4B94', player4light: '#E5D9EC',
           player5: '#A93F3F', player5light: '#EFD6D6',
           player6: '#8A6D1D', player6light: '#EDE2C2',
+          player7: '#1F7A6C', player7light: '#D3E8E3',
+          player8: '#5B6B7A', player8light: '#DDE3E8',
         },
         fontFamily: {
           display: ['"Fjalla One"', 'sans-serif'],
@@ -182,9 +184,11 @@ const PLAYER_COLORS = [
   { name: 'player4', light: 'player4light' },
   { name: 'player5', light: 'player5light' },
   { name: 'player6', light: 'player6light' },
+  { name: 'player7', light: 'player7light' },
+  { name: 'player8', light: 'player8light' },
 ];
-const MIN_PLAYERS = 2;
-const MAX_PLAYERS = 6;
+const MIN_PLAYERS = 1;
+const MAX_PLAYERS = 8;
 
 /* ---------- Tannenbaum (Spiel 1) config ---------- */
 const ROWS = [
@@ -303,6 +307,15 @@ const NULL_START_OPTIONS = [401, 301, 201];
 const MIN_NULL_ARROWS = 1;
 const MAX_NULL_ARROWS = 10;
 
+function nextActiveNullPlayer(current) {
+  const n = state.numPlayers;
+  for (let i = 1; i <= n; i++) {
+    const cand = (current + i) % n;
+    if (!state.nullFinishOrder.includes(cand)) return cand;
+  }
+  return current;
+}
+
 function defaultNames(n) {
   return Array.from({ length: n }, (_, i) => `Spieler ${i + 1}`);
 }
@@ -327,6 +340,7 @@ let state = {
   trees: [],
   active: 0,
   history: [],
+  treeFinishOrder: [],
 
   // points game
   pointsScores: [],
@@ -347,7 +361,7 @@ let state = {
   nullScores: [],
   nullActive: 0,
   nullTurnArrows: [],
-  nullWinner: null,
+  nullFinishOrder: [],
   nullHistory: [],
   nullBustMessage: null,
 
@@ -669,14 +683,31 @@ function renderSetup() {
   `;
 }
 
+/* ---------- Ranking (gemeinsam für alle Spiele) ---------- */
+function renderRankingBanner(entries, title) {
+  const medals = ['🥇', '🥈', '🥉'];
+  return `
+    <div class="mt-4 rounded-2xl bg-pine text-parchment px-5 py-4 pop-in">
+      <p class="font-display text-xl text-center mb-3">${title || '🏆 Rangliste'}</p>
+      <div class="flex flex-col gap-1.5">
+        ${entries.map((e, i) => `
+          <div class="flex items-center justify-between text-sm gap-3">
+            <span class="truncate">${medals[i] || (i + 1) + '.'} ${escapeHtml(e.label)}</span>
+            <span class="font-display whitespace-nowrap">${e.value}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
 /* ---------- Tree game ---------- */
 function renderTreeGame() {
   const n = state.numPlayers;
-  const winners = [...Array(n).keys()].filter(p => isTreeComplete(state.trees[p]));
   const canUndo = state.history.length > 0;
 
   return `
-    ${winners.length ? renderTreeWinnerBanner(winners) : ''}
+    ${state.treeFinishOrder.length ? renderTreeRanking() : ''}
     <div class="sticky top-0 z-10 bg-parchment/95 backdrop-blur pt-4 pb-3 -mx-4 px-4 border-b border-parchment2">
       <div class="flex items-center justify-between mb-3">
         <div class="flex items-center gap-2">
@@ -715,14 +746,18 @@ function renderTreeGame() {
   `;
 }
 
-function renderTreeWinnerBanner(winners) {
-  const names = winners.map(p => escapeHtml(state.playerNames[p])).join(' & ');
-  return `
-    <div class="mt-4 rounded-2xl bg-pine text-parchment px-5 py-4 text-center pop-in">
-      <p class="font-display text-2xl">🏆 ${names} hat gewonnen!</p>
-      <p class="text-sm text-parchment/80 mt-0.5">Der Tannenbaum ist komplett abgeräumt.</p>
-    </div>
-  `;
+function renderTreeRanking() {
+  const n = state.numPlayers;
+  const finished = state.treeFinishOrder;
+  const unfinished = [...Array(n).keys()]
+    .filter(p => !finished.includes(p))
+    .sort((a, b) => totalHits(state.trees[b]) - totalHits(state.trees[a]));
+  const order = [...finished, ...unfinished];
+  const entries = order.map(p => ({
+    label: state.playerNames[p] + (finished.includes(p) ? '' : ' (im Spiel)'),
+    value: `${totalHits(state.trees[p])}/${TREE_TOTAL}`,
+  }));
+  return renderRankingBanner(entries);
 }
 
 function renderTreeCard(p) {
@@ -762,23 +797,9 @@ function renderTreeCard(p) {
 
 /* ---------- Shared: totals winner banner + standings bar ---------- */
 function renderTotalsWinnerBanner(totals, maxTotal, subtitleWord) {
-  const winners = totals.map((t, i) => ({ t, i })).filter(x => x.t === maxTotal);
-  if (winners.length > 1) {
-    const names = winners.map(w => escapeHtml(state.playerNames[w.i])).join(' & ');
-    return `
-      <div class="mt-4 rounded-2xl bg-pine text-parchment px-5 py-4 text-center pop-in">
-        <p class="font-display text-2xl">🤝 Unentschieden!</p>
-        <p class="text-sm text-parchment/80 mt-0.5">${names} erreichen je ${maxTotal} ${subtitleWord}.</p>
-      </div>
-    `;
-  }
-  const w = winners[0];
-  return `
-    <div class="mt-4 rounded-2xl bg-pine text-parchment px-5 py-4 text-center pop-in">
-      <p class="font-display text-2xl">🏆 ${escapeHtml(state.playerNames[w.i])} gewinnt!</p>
-      <p class="text-sm text-parchment/80 mt-0.5">Endstand: ${w.t} ${subtitleWord}.</p>
-    </div>
-  `;
+  const order = totals.map((t, i) => ({ i, t })).sort((a, b) => b.t - a.t);
+  const entries = order.map(o => ({ label: state.playerNames[o.i], value: `${o.t} ${subtitleWord}` }));
+  return renderRankingBanner(entries);
 }
 
 function renderStandingsBar(totals) {
@@ -868,11 +889,12 @@ function renderPointsCard(p) {
   `;
 }
 
+const PHONE_KEYPAD_ORDER = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 10];
+
 function renderNumpadOverlay() {
   if (!state.picker) return '';
   const { player: p, round, idx } = state.picker;
   const c = PLAYER_COLORS[p % PLAYER_COLORS.length];
-  const numbers = Array.from({ length: 11 }, (_, i) => i); // 0..10
 
   return `
     <div data-action="close-picker" class="fixed inset-0 z-50 flex items-end justify-center" style="background:rgba(15,42,31,0.55);">
@@ -880,15 +902,15 @@ function renderNumpadOverlay() {
         <div class="w-10 h-1.5 bg-parchment2 rounded-full mx-auto mb-4"></div>
         <p class="text-center text-sm text-ink/60 mb-1">${escapeHtml(state.playerNames[p])} · Runde ${round + 1}</p>
         <p class="text-center font-display text-lg text-${c.name} mb-4">Pfeil ${idx + 1} – Punktzahl wählen</p>
-        <div class="grid grid-cols-4 gap-3">
-          ${numbers.map(val => `
+        <div class="grid grid-cols-3 gap-3">
+          ${PHONE_KEYPAD_ORDER.map(val => `
             <button data-action="pick-score" data-player="${p}" data-round="${round}" data-idx="${idx}" data-value="${val}"
               class="h-16 rounded-2xl border-2 border-${c.name} bg-${c.light} text-${c.name} font-display text-2xl active:scale-90 transition-transform">
               ${val}
             </button>
           `).join('')}
           <button data-action="close-picker"
-            class="h-16 rounded-2xl border-2 border-ink/15 text-ink/50 font-display text-base active:scale-90 transition-transform">
+            class="h-16 rounded-2xl border-2 border-ink/15 text-ink/50 font-display text-sm active:scale-90 transition-transform">
             Schließen
           </button>
         </div>
@@ -1010,10 +1032,10 @@ function renderLottoPlayerCard(p, round) {
 function renderNullGame() {
   const n = state.numPlayers;
   const canUndo = state.nullHistory.length > 0;
-  const winner = state.nullWinner;
+  const allFinished = state.nullFinishOrder.length === n;
 
   return `
-    ${winner !== null ? renderNullWinnerBanner(winner) : ''}
+    ${state.nullFinishOrder.length ? renderNullRanking() : ''}
     ${state.nullBustMessage ? renderNullBustBanner() : ''}
     <div class="sticky top-0 z-10 bg-parchment/95 backdrop-blur pt-4 pb-3 -mx-4 px-4 border-b border-parchment2">
       <div class="flex items-center justify-between mb-3">
@@ -1039,17 +1061,34 @@ function renderNullGame() {
       ${[...Array(n).keys()].map(p => renderNullBoardCard(p)).join('')}
     </div>
 
-    ${winner === null ? renderNullTurnCard() : ''}
+    ${!allFinished ? renderNullTurnCard() : ''}
   `;
+}
+
+function renderNullRanking() {
+  const n = state.numPlayers;
+  const finished = state.nullFinishOrder;
+  const unfinished = [...Array(n).keys()]
+    .filter(p => !finished.includes(p))
+    .sort((a, b) => state.nullScores[a] - state.nullScores[b]);
+  const order = [...finished, ...unfinished];
+  const entries = order.map(p => ({
+    label: state.playerNames[p] + (finished.includes(p) ? '' : ' (im Spiel)'),
+    value: finished.includes(p) ? '0' : state.nullScores[p],
+  }));
+  return renderRankingBanner(entries);
 }
 
 function renderNullBoardCard(p) {
   const c = PLAYER_COLORS[p % PLAYER_COLORS.length];
-  const isActive = state.nullActive === p && state.nullWinner === null;
-  const isWinner = state.nullWinner === p;
+  const finishedIdx = state.nullFinishOrder.indexOf(p);
+  const isFinished = finishedIdx !== -1;
+  const isActive = state.nullActive === p && !isFinished;
+  const medals = ['🏆', '🥈', '🥉'];
+  const medal = isFinished ? (medals[finishedIdx] || `${finishedIdx + 1}.`) : '';
   return `
-    <div class="bg-white rounded-2xl border-2 ${isActive || isWinner ? `border-${c.name}` : 'border-parchment2'} p-4 flex items-center justify-between ${isActive || isWinner ? '' : 'tree-dim'}">
-      <p class="font-display text-lg text-${c.name}">${isActive ? '🎯 ' : ''}${isWinner ? '🏆 ' : ''}${escapeHtml(state.playerNames[p])}</p>
+    <div class="bg-white rounded-2xl border-2 ${isActive || isFinished ? `border-${c.name}` : 'border-parchment2'} p-4 flex items-center justify-between ${isActive || isFinished ? '' : 'tree-dim'}">
+      <p class="font-display text-lg text-${c.name}">${isActive ? '🎯 ' : ''}${medal ? medal + ' ' : ''}${escapeHtml(state.playerNames[p])}</p>
       <p class="font-display text-3xl text-${c.name}">${state.nullScores[p]}</p>
     </div>
   `;
@@ -1073,23 +1112,14 @@ function renderNullTurnCard() {
         `).join('')}
       </div>
       <p class="text-xs text-ink/50 mb-2">Pfeilwert eingeben:</p>
-      <div class="flex flex-wrap gap-2">
-        ${Array.from({ length: 11 }).map((_, val) => `
+      <div class="grid grid-cols-3 gap-2">
+        ${PHONE_KEYPAD_ORDER.map(val => `
           <button data-action="pick-null-arrow" data-value="${val}"
-            class="pick-btn border-2 border-${c.name} bg-${c.light} text-${c.name}">
+            class="h-14 rounded-2xl border-2 border-${c.name} bg-${c.light} text-${c.name} font-display text-xl active:scale-90 transition-transform">
             ${val}
           </button>
         `).join('')}
       </div>
-    </div>
-  `;
-}
-
-function renderNullWinnerBanner(p) {
-  return `
-    <div class="mt-4 rounded-2xl bg-pine text-parchment px-5 py-4 text-center pop-in">
-      <p class="font-display text-2xl">🏆 ${escapeHtml(state.playerNames[p])} gewinnt!</p>
-      <p class="text-sm text-parchment/80 mt-0.5">Exakt auf 0 getroffen.</p>
     </div>
   `;
 }
@@ -1209,9 +1239,10 @@ function resetToStart() {
   state.nullScores = [];
   state.nullActive = 0;
   state.nullTurnArrows = [];
-  state.nullWinner = null;
+  state.nullFinishOrder = [];
   state.nullHistory = [];
   state.nullBustMessage = null;
+  state.treeFinishOrder = [];
   state.treeStatsRecorded = false;
   state.pointsStatsRecorded = false;
   state.lottoStatsRecorded = false;
@@ -1394,7 +1425,7 @@ document.getElementById('app').addEventListener('click', (e) => {
       state.nullScores = new Array(state.numPlayers).fill(state.nullStartScore);
       state.nullActive = 0;
       state.nullTurnArrows = [];
-      state.nullWinner = null;
+      state.nullFinishOrder = [];
       state.nullHistory = [];
       state.nullBustMessage = null;
       state.nullStatsRecorded = false;
@@ -1451,10 +1482,12 @@ document.getElementById('app').addEventListener('click', (e) => {
     if (state.trees[p][r][col] === true) return;
     state.trees[p][r][col] = true;
     state.history.push({ p, r, col });
-    if (isTreeComplete(state.trees[p]) && !state.treeStatsRecorded) {
-      const winners = [...Array(state.numPlayers).keys()].filter(pl => isTreeComplete(state.trees[pl]));
-      recordGameResult('tree', winners.map(pl => state.playerNames[pl]).join(' & '));
-      state.treeStatsRecorded = true;
+    if (isTreeComplete(state.trees[p]) && !state.treeFinishOrder.includes(p)) {
+      state.treeFinishOrder.push(p);
+      if (!state.treeStatsRecorded) {
+        recordGameResult('tree', state.playerNames[state.treeFinishOrder[0]]);
+        state.treeStatsRecorded = true;
+      }
     }
     render();
   }
@@ -1462,6 +1495,7 @@ document.getElementById('app').addEventListener('click', (e) => {
     const last = state.history.pop();
     if (last) {
       state.trees[last.p][last.r][last.col] = false;
+      state.treeFinishOrder = state.treeFinishOrder.filter(pl => isTreeComplete(state.trees[pl]));
       render();
     }
   }
@@ -1470,6 +1504,7 @@ document.getElementById('app').addEventListener('click', (e) => {
       state.trees = Array.from({ length: state.numPlayers }, () => makeTree());
       state.history = [];
       state.active = 0;
+      state.treeFinishOrder = [];
       state.treeStatsRecorded = false;
       render();
     }
@@ -1587,15 +1622,15 @@ document.getElementById('app').addEventListener('click', (e) => {
 
   /* --- nullschuss actions --- */
   if (action === 'pick-null-arrow') {
+    if (state.nullFinishOrder.includes(state.nullActive)) return;
     state.nullBustMessage = null;
-    if (state.nullWinner !== null) return;
     const value = parseInt(target.dataset.value, 10);
 
     state.nullHistory.push(JSON.parse(JSON.stringify({
       scores: state.nullScores,
       active: state.nullActive,
       turnArrows: state.nullTurnArrows,
-      winner: state.nullWinner,
+      finishOrder: state.nullFinishOrder,
     })));
 
     const p = state.nullActive;
@@ -1605,18 +1640,23 @@ document.getElementById('app').addEventListener('click', (e) => {
     if (running < 0) {
       state.nullBustMessage = { player: p };
       state.nullTurnArrows = [];
-      state.nullActive = (p + 1) % state.numPlayers;
+      state.nullActive = nextActiveNullPlayer(p);
     } else if (running === 0) {
       state.nullScores[p] = 0;
-      state.nullWinner = p;
-      if (!state.nullStatsRecorded) {
-        recordGameResult('null', state.playerNames[p]);
-        state.nullStatsRecorded = true;
+      state.nullTurnArrows = [];
+      if (!state.nullFinishOrder.includes(p)) state.nullFinishOrder.push(p);
+      if (state.nullFinishOrder.length === state.numPlayers) {
+        if (!state.nullStatsRecorded) {
+          recordGameResult('null', state.playerNames[state.nullFinishOrder[0]]);
+          state.nullStatsRecorded = true;
+        }
+      } else {
+        state.nullActive = nextActiveNullPlayer(p);
       }
     } else if (state.nullTurnArrows.length === state.nullArrowsPerTurn) {
       state.nullScores[p] = running;
       state.nullTurnArrows = [];
-      state.nullActive = (p + 1) % state.numPlayers;
+      state.nullActive = nextActiveNullPlayer(p);
     }
     render();
   }
@@ -1626,7 +1666,7 @@ document.getElementById('app').addEventListener('click', (e) => {
       state.nullScores = last.scores;
       state.nullActive = last.active;
       state.nullTurnArrows = last.turnArrows;
-      state.nullWinner = last.winner;
+      state.nullFinishOrder = last.finishOrder;
       state.nullBustMessage = null;
       render();
     }
@@ -1636,7 +1676,7 @@ document.getElementById('app').addEventListener('click', (e) => {
       state.nullScores = new Array(state.numPlayers).fill(state.nullStartScore);
       state.nullActive = 0;
       state.nullTurnArrows = [];
-      state.nullWinner = null;
+      state.nullFinishOrder = [];
       state.nullHistory = [];
       state.nullBustMessage = null;
       state.nullStatsRecorded = false;
@@ -1644,6 +1684,7 @@ document.getElementById('app').addEventListener('click', (e) => {
     }
   }
 });
+
 
 render();
 </script>
