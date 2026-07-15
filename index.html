@@ -211,13 +211,14 @@ function makeTree() {
 }
 
 /* ---------- Punktejagd (Spiel 2) config ---------- */
-const POINTS_ROUNDS = 3;
+const MIN_POINTS_ROUNDS = 1;
+const MAX_POINTS_ROUNDS = 5;
 const MIN_POINTS_ARROWS = 3;
 const MAX_POINTS_ARROWS = 9;
 
-function makePointsScores(numPlayers, numArrows) {
+function makePointsScores(numPlayers, numArrows, numRounds) {
   return Array.from({ length: numPlayers }, () =>
-    Array.from({ length: POINTS_ROUNDS }, () => new Array(numArrows).fill(null))
+    Array.from({ length: numRounds }, () => new Array(numArrows).fill(null))
   );
 }
 
@@ -373,6 +374,7 @@ let state = {
   mode: null,
   playerNames: defaultNames(2),
   numArrows: 3,
+  numRoundsPoints: 3,
   numRoundsLotto: 3,
   lottoArrowsPerRound: 3,
   pausedPlayers: [],
@@ -440,7 +442,7 @@ function roundTotal(player, round) {
 }
 function grandTotal(player) {
   let sum = 0;
-  for (let r = 0; r < POINTS_ROUNDS; r++) sum += roundTotal(player, r);
+  for (let r = 0; r < state.numRoundsPoints; r++) sum += roundTotal(player, r);
   return sum;
 }
 function allPointsFilled() {
@@ -800,8 +802,13 @@ function renderSetup() {
         `;
       }).join('')}
       ${isPoints ? `
-        <label class="block mb-6 mt-2">
-          <span class="text-sm font-medium text-ink/70 mb-1 block">Pfeile pro Runde (3 Runden gesamt, ${MIN_POINTS_ARROWS}–${MAX_POINTS_ARROWS})</span>
+        <label class="block mb-4 mt-2">
+          <span class="text-sm font-medium text-ink/70 mb-1 block">Anzahl Runden (${MIN_POINTS_ROUNDS}–${MAX_POINTS_ROUNDS})</span>
+          <input type="number" id="num-points-rounds-input" value="${state.numRoundsPoints}" min="${MIN_POINTS_ROUNDS}" max="${MAX_POINTS_ROUNDS}"
+            class="w-full h-12 px-4 rounded-xl border-2 border-gold/40 focus:border-gold outline-none text-base font-medium">
+        </label>
+        <label class="block mb-6">
+          <span class="text-sm font-medium text-ink/70 mb-1 block">Pfeile pro Runde (${MIN_POINTS_ARROWS}–${MAX_POINTS_ARROWS})</span>
           <input type="number" id="num-arrows-input" value="${state.numArrows}" min="${MIN_POINTS_ARROWS}" max="${MAX_POINTS_ARROWS}"
             class="w-full h-12 px-4 rounded-xl border-2 border-gold/40 focus:border-gold outline-none text-base font-medium">
         </label>
@@ -1026,10 +1033,10 @@ function renderPointsGame() {
           </button>
         </div>
       </div>
-      <div class="grid grid-cols-3 gap-2">
-        ${Array.from({ length: POINTS_ROUNDS }).map((_, r) => `
+      <div class="flex flex-wrap gap-2">
+        ${Array.from({ length: state.numRoundsPoints }).map((_, r) => `
           <button data-action="select-round" data-round="${r}"
-            class="h-11 rounded-xl font-display text-sm border-2 transition-colors
+            class="flex-1 min-w-[70px] h-11 rounded-xl font-display text-sm border-2 transition-colors
               ${state.pointsRound === r ? 'bg-gold border-gold text-white' : 'bg-white border-parchment2 text-ink/60'}">
             Runde ${r + 1}
           </button>
@@ -1499,6 +1506,7 @@ function resetToStart() {
   state.mode = null;
   state.playerNames = defaultNames(2);
   state.numArrows = 3;
+  state.numRoundsPoints = 3;
   state.numRoundsLotto = 3;
   state.lottoArrowsPerRound = 3;
   state.pausedPlayers = [];
@@ -1678,12 +1686,18 @@ document.getElementById('app').addEventListener('click', (e) => {
       state.treeStatsRecorded = false;
       state.screen = 'game-tree';
     } else if (state.mode === 'points') {
+      const roundsInput = document.getElementById('num-points-rounds-input');
+      let numPR = parseInt(roundsInput.value, 10);
+      if (!numPR || numPR < MIN_POINTS_ROUNDS) numPR = MIN_POINTS_ROUNDS;
+      if (numPR > MAX_POINTS_ROUNDS) numPR = MAX_POINTS_ROUNDS;
+      state.numRoundsPoints = numPR;
+
       const numInput = document.getElementById('num-arrows-input');
       let numA = parseInt(numInput.value, 10);
       if (!numA || numA < MIN_POINTS_ARROWS) numA = MIN_POINTS_ARROWS;
       if (numA > MAX_POINTS_ARROWS) numA = MAX_POINTS_ARROWS;
       state.numArrows = numA;
-      state.pointsScores = makePointsScores(state.numPlayers, numA);
+      state.pointsScores = makePointsScores(state.numPlayers, numA, numPR);
       state.pointsRound = 0;
       state.picker = null;
       state.pointsHistory = [];
@@ -1861,7 +1875,7 @@ document.getElementById('app').addEventListener('click', (e) => {
   }
   if (action === 'reset-points') {
     if (confirm('Spiel wirklich zurücksetzen? Alle Punkte gehen verloren.')) {
-      state.pointsScores = makePointsScores(state.numPlayers, state.numArrows);
+      state.pointsScores = makePointsScores(state.numPlayers, state.numArrows, state.numRoundsPoints);
       state.pointsRound = 0;
       state.picker = null;
       state.pointsHistory = [];
