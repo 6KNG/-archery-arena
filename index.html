@@ -369,6 +369,7 @@ let state = {
   sessionCode: null,
   joinTimedOut: false,
   _receivedAnyData: false,
+  prefillJoinCode: null,
 
   numPlayers: 2,
   mode: null,
@@ -649,14 +650,28 @@ function renderMultiChoice() {
   `;
 }
 
+function joinUrlForCode(code) {
+  const url = new URL(window.location.href);
+  url.search = '';
+  url.hash = '';
+  url.searchParams.set('code', code);
+  return url.toString();
+}
+function qrImageUrl(data) {
+  return `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(data)}`;
+}
+
 function renderHostCodeScreen() {
+  const joinUrl = joinUrlForCode(state.sessionCode);
   return `
-    <div class="pt-16 pb-8 text-center">
+    <div class="pt-12 pb-8 text-center">
       <p class="font-display text-gold text-sm tracking-[0.3em] uppercase mb-1">Session-Code</p>
-      <div class="bg-white rounded-2xl border-2 border-gold py-8 px-6 my-6">
-        <p class="font-display text-6xl text-pinedark tracking-[0.2em]">${state.sessionCode}</p>
+      <div class="bg-white rounded-2xl border-2 border-gold py-6 px-6 my-4">
+        <p class="font-display text-5xl text-pinedark tracking-[0.2em] mb-4">${state.sessionCode}</p>
+        <img src="${qrImageUrl(joinUrl)}" alt="QR-Code zum Beitreten" class="mx-auto rounded-xl border border-parchment2" width="180" height="180">
+        <p class="text-[11px] text-ink/40 mt-3 break-all leading-relaxed">${escapeHtml(joinUrl)}</p>
       </div>
-      <p class="text-sm text-ink/60 mb-8 px-2">Gib diesen Code an die anderen Geräte weiter. Sie sehen den Spielstand live mit, sobald ihr spielt.</p>
+      <p class="text-sm text-ink/60 mb-8 px-2">QR-Code scannen oder Code eintippen – andere Geräte sehen den Spielstand dann live mit.</p>
       <button data-action="continue-after-host"
         class="w-full h-13 py-3 rounded-xl bg-pine text-parchment font-display text-lg tracking-wide active:scale-[0.98] transition-transform">
         Weiter
@@ -673,7 +688,7 @@ function renderJoinScreen() {
       <p class="text-sm text-ink/60">Code vom Host eingeben</p>
     </div>
     <div class="bg-white rounded-2xl border border-parchment2 shadow-sm p-6">
-      <input type="text" id="join-code-input" maxlength="4" inputmode="numeric" placeholder="0000"
+      <input type="text" id="join-code-input" maxlength="4" inputmode="numeric" placeholder="0000" value="${state.prefillJoinCode ? escapeHtml(state.prefillJoinCode) : ''}"
         class="w-full h-16 px-4 rounded-xl border-2 border-gold/40 focus:border-gold outline-none text-center font-display text-3xl tracking-[0.3em] mb-4">
       <p id="join-error" class="text-sm text-center mb-4 hidden" style="color:#A93F3F;">Bitte einen 4-stelligen Code eingeben.</p>
       <button data-action="submit-join-code"
@@ -899,6 +914,7 @@ function renderTreeGame() {
       <div class="flex items-center justify-between mb-3">
         <div class="flex items-center gap-2">
           <button data-action="go-home" class="h-9 w-9 rounded-lg border-2 border-ink/15 flex items-center justify-center">🏠</button>
+          ${!state.isSpectator ? `<button data-action="switch-game" class="h-9 w-9 rounded-lg border-2 border-ink/15 flex items-center justify-center" title="Zurück zum Spielmenü">🔁</button>` : ''}
           <p class="font-display text-2xl text-pinedark">Tannenbaum</p>
         </div>
         <div class="flex gap-2">
@@ -1020,6 +1036,7 @@ function renderPointsGame() {
       <div class="flex items-center justify-between mb-3">
         <div class="flex items-center gap-2">
           <button data-action="go-home" class="h-9 w-9 rounded-lg border-2 border-ink/15 flex items-center justify-center">🏠</button>
+          ${!state.isSpectator ? `<button data-action="switch-game" class="h-9 w-9 rounded-lg border-2 border-ink/15 flex items-center justify-center" title="Zurück zum Spielmenü">🔁</button>` : ''}
           <p class="font-display text-2xl text-pinedark">Punktejagd</p>
         </div>
         <div class="flex gap-2">
@@ -1079,7 +1096,7 @@ function renderPointsCard(p) {
 }
 
 function renderNumpadOverlay() {
-  if (!state.picker) return '';
+  if (!state.picker || state.isSpectator) return '';
   const { player: p, round, idx } = state.picker;
   const c = PLAYER_COLORS[p % PLAYER_COLORS.length];
 
@@ -1118,14 +1135,18 @@ function renderTiebreakPanel() {
       <p class="text-sm text-parchment/80 text-center mb-3">Versuch ${tb.attempt + 1} von ${tb.maxAttempts} – höchste Zahl gewinnt</p>
       ${nextPlayer !== undefined ? `
         <p class="text-center font-display text-lg mb-3">${escapeHtml(state.playerNames[nextPlayer])} schießt</p>
-        <div class="grid grid-cols-3 gap-2">
-          ${PHONE_KEYPAD_ORDER.map(val => `
-            <button data-action="tiebreak-answer-points" data-player="${nextPlayer}" data-value="${val}"
-              class="h-14 rounded-2xl border-2 border-parchment bg-white/10 text-parchment font-display text-xl active:scale-90 transition-transform">
-              ${val}
-            </button>
-          `).join('')}
-        </div>
+        ${state.isSpectator ? `
+          <p class="text-xs text-parchment/60 text-center italic">👁 Zuschauer-Ansicht – Eingabe nur auf dem Host-Gerät</p>
+        ` : `
+          <div class="grid grid-cols-3 gap-2">
+            ${PHONE_KEYPAD_ORDER.map(val => `
+              <button data-action="tiebreak-answer-points" data-player="${nextPlayer}" data-value="${val}"
+                class="h-14 rounded-2xl border-2 border-parchment bg-white/10 text-parchment font-display text-xl active:scale-90 transition-transform">
+                ${val}
+              </button>
+            `).join('')}
+          </div>
+        `}
       ` : ''}
       <div class="flex flex-wrap gap-2 justify-center mt-4">
         ${contenders.map(p => `<span class="text-xs px-2 py-1 rounded-full ${tb.answers[p] !== undefined ? 'bg-parchment text-pine' : 'border border-parchment/40 text-parchment/70'}">${escapeHtml(state.playerNames[p])}${tb.answers[p] !== undefined ? ': ' + tb.answers[p] : ''}</span>`).join('')}
@@ -1150,6 +1171,8 @@ function renderTiebreakPanel() {
             <span class="text-sm">${escapeHtml(state.playerNames[p])}</span>
             ${tb.answers[p] !== undefined ? `
               <span class="text-xs px-2 py-1 rounded-full bg-parchment text-pine">${tb.answers[p] ? '✅ Getroffen' : '❌ Verfehlt'}</span>
+            ` : state.isSpectator ? `
+              <span class="text-xs text-parchment/50 italic">wartet...</span>
             ` : `
               <span class="flex gap-2">
                 <button data-action="tiebreak-answer-lotto" data-player="${p}" data-hit="1" class="text-xs px-3 py-1.5 rounded-lg border border-parchment text-parchment">✅ Treffer</button>
@@ -1206,6 +1229,7 @@ function renderLottoGame() {
       <div class="flex items-center justify-between mb-3">
         <div class="flex items-center gap-2">
           <button data-action="go-home" class="h-9 w-9 rounded-lg border-2 border-ink/15 flex items-center justify-center">🏠</button>
+          ${!state.isSpectator ? `<button data-action="switch-game" class="h-9 w-9 rounded-lg border-2 border-ink/15 flex items-center justify-center" title="Zurück zum Spielmenü">🔁</button>` : ''}
           <p class="font-display text-2xl text-pinedark">Zahlenlotto</p>
         </div>
         <div class="flex gap-2">
@@ -1228,10 +1252,32 @@ function renderLottoGame() {
           </button>
         `).join('')}
       </div>
+      ${renderLiveStandings('lotto')}
     </div>
 
     <div class="mt-5">
       ${calls === null ? renderLottoDrawCard(round) : renderLottoRoundContent(round, calls)}
+    </div>
+  `;
+}
+
+function renderLiveStandings(game) {
+  const totals = computeTotalsMap(game);
+  const active = activePlayerIndices();
+  if (active.length === 0) return '';
+  const maxTotal = Math.max(...active.map(p => totals[p]));
+  const sorted = [...active].sort((a, b) => totals[b] - totals[a]);
+  return `
+    <div class="flex flex-wrap gap-2 bg-white rounded-xl border border-parchment2 px-3 py-2 mt-3">
+      ${sorted.map(p => {
+        const c = PLAYER_COLORS[p % PLAYER_COLORS.length];
+        const isLeader = totals[p] === maxTotal && maxTotal > 0;
+        return `
+          <span class="text-sm font-medium ${isLeader ? `text-${c.name}` : 'text-ink/60'}">
+            ${escapeHtml(state.playerNames[p])}: <span class="font-display text-base">${totals[p]}</span>${isLeader ? ' 👑' : ''}
+          </span>
+        `;
+      }).join('<span class="text-ink/20">|</span>')}
     </div>
   `;
 }
@@ -1320,6 +1366,7 @@ function renderNullGame() {
       <div class="flex items-center justify-between mb-3">
         <div class="flex items-center gap-2">
           <button data-action="go-home" class="h-9 w-9 rounded-lg border-2 border-ink/15 flex items-center justify-center">🏠</button>
+          ${!state.isSpectator ? `<button data-action="switch-game" class="h-9 w-9 rounded-lg border-2 border-ink/15 flex items-center justify-center" title="Zurück zum Spielmenü">🔁</button>` : ''}
           <p class="font-display text-2xl text-pinedark">Nullschuss</p>
         </div>
         <div class="flex gap-2">
@@ -1396,15 +1443,19 @@ function renderNullTurnCard() {
           </div>
         `).join('')}
       </div>
-      <p class="text-xs text-ink/50 mb-2">Pfeilwert eingeben:</p>
-      <div class="grid grid-cols-3 gap-2">
-        ${PHONE_KEYPAD_ORDER.map(val => `
-          <button data-action="pick-null-arrow" data-value="${val}"
-            class="h-14 rounded-2xl border-2 border-${c.name} bg-${c.light} text-${c.name} font-display text-xl active:scale-90 transition-transform">
-            ${val}
-          </button>
-        `).join('')}
-      </div>
+      ${state.isSpectator ? `
+        <p class="text-xs text-ink/40 text-center italic">👁 Zuschauer-Ansicht – Eingabe nur auf dem Host-Gerät</p>
+      ` : `
+        <p class="text-xs text-ink/50 mb-2">Pfeilwert eingeben:</p>
+        <div class="grid grid-cols-3 gap-2">
+          ${PHONE_KEYPAD_ORDER.map(val => `
+            <button data-action="pick-null-arrow" data-value="${val}"
+              class="h-14 rounded-2xl border-2 border-${c.name} bg-${c.light} text-${c.name} font-display text-xl active:scale-90 transition-transform">
+              ${val}
+            </button>
+          `).join('')}
+        </div>
+      `}
     </div>
   `;
 }
@@ -1489,6 +1540,53 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+function attemptJoin(code) {
+  if (typeof window.fbJoinSession !== 'function' || !window.fbConfigured) {
+    state.deviceMode = 'multi';
+    state.screen = 'join-code';
+    state.prefillJoinCode = code;
+    render();
+    const errorEl = document.getElementById('join-error');
+    if (errorEl) {
+      errorEl.textContent = 'Verbindung nicht verfügbar (Firebase noch nicht eingerichtet).';
+      errorEl.classList.remove('hidden');
+    }
+    return;
+  }
+
+  state.sessionCode = code;
+  state.isHost = false;
+  state.isSpectator = true;
+  state.joinTimedOut = false;
+  state._receivedAnyData = false;
+  state.deviceMode = 'multi';
+  state.screen = 'spectator-waiting';
+  render();
+
+  setTimeout(() => {
+    if (state.screen === 'spectator-waiting' && !state._receivedAnyData) {
+      state.joinTimedOut = true;
+      render();
+    }
+  }, 6000);
+
+  window.fbJoinSession(code, (data) => {
+    if (!data) return;
+    state._receivedAnyData = true;
+    Object.assign(state, data);
+    state.isHost = false;
+    state.isSpectator = true;
+    state.sessionCode = code;
+    state.deviceMode = 'multi';
+    state.joinTimedOut = false;
+    const liveScreens = ['game-tree', 'game-points', 'game-lotto', 'game-null'];
+    if (!liveScreens.includes(state.screen)) {
+      state.screen = 'spectator-waiting';
+    }
+    render();
+  });
 }
 
 function resetToStart() {
@@ -1592,41 +1690,7 @@ document.getElementById('app').addEventListener('click', (e) => {
       errorEl.classList.remove('hidden');
       return;
     }
-    if (typeof window.fbJoinSession !== 'function' || !window.fbConfigured) {
-      errorEl.textContent = 'Verbindung nicht verfügbar (Firebase noch nicht eingerichtet).';
-      errorEl.classList.remove('hidden');
-      return;
-    }
-    state.sessionCode = code;
-    state.isHost = false;
-    state.isSpectator = true;
-    state.joinTimedOut = false;
-    state._receivedAnyData = false;
-    state.screen = 'spectator-waiting';
-    render();
-
-    setTimeout(() => {
-      if (state.screen === 'spectator-waiting' && !state._receivedAnyData) {
-        state.joinTimedOut = true;
-        render();
-      }
-    }, 6000);
-
-    window.fbJoinSession(code, (data) => {
-      if (!data) return;
-      state._receivedAnyData = true;
-      Object.assign(state, data);
-      state.isHost = false;
-      state.isSpectator = true;
-      state.sessionCode = code;
-      state.deviceMode = 'multi';
-      state.joinTimedOut = false;
-      const liveScreens = ['game-tree', 'game-points', 'game-lotto', 'game-null'];
-      if (!liveScreens.includes(state.screen)) {
-        state.screen = 'spectator-waiting';
-      }
-      render();
-    });
+    attemptJoin(code);
   }
   if (action === 'leave-session') {
     if (typeof window.fbLeaveSession === 'function') {
@@ -1784,6 +1848,15 @@ document.getElementById('app').addEventListener('click', (e) => {
       render();
     } else if (confirm('Zurück zum Start? Der aktuelle Fortschritt geht verloren.')) {
       resetToStart();
+      render();
+    }
+  }
+
+  if (action === 'switch-game') {
+    if (confirm('Zurück zum Spielmenü? Der Fortschritt in diesem Spiel geht verloren – Namen und Spieleranzahl bleiben erhalten.')) {
+      state.mode = null;
+      state.screen = 'mode';
+      state.tiebreak = null;
       render();
     }
   }
@@ -2011,7 +2084,12 @@ document.getElementById('app').addEventListener('click', (e) => {
   }
 });
 
-render();
+const urlCode = new URLSearchParams(window.location.search).get('code');
+if (urlCode && /^\d{4}$/.test(urlCode)) {
+  attemptJoin(urlCode);
+} else {
+  render();
+}
 </script>
 </body>
 </html>
