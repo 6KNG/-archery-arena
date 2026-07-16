@@ -168,6 +168,19 @@
     fbUnsubscribe = () => off(sessionRef, 'value', listener);
   };
 
+  window.fbFetchOnce = async function (code) {
+    const ok = await fbInit();
+    if (!ok) return null;
+    const { ref, get } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js');
+    try {
+      const snap = await get(ref(fbDb, 'sessions/' + code));
+      return snap.exists() ? snap.val() : null;
+    } catch (e) {
+      console.error('Firebase fetch error', e);
+      return null;
+    }
+  };
+
   window.fbLeaveSession = function () {
     if (fbUnsubscribe) { fbUnsubscribe(); fbUnsubscribe = null; }
   };
@@ -304,6 +317,52 @@ function nextActiveNullPlayer(current) {
 
 function defaultNames(n) {
   return Array.from({ length: n }, (_, i) => `Spieler ${i + 1}`);
+}
+
+/* ---------- Lokale Session-Wiederherstellung (max. 48h) ---------- */
+const LOCAL_SESSION_KEY = 'archeryArenaLastSession_v1';
+const SESSION_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+
+function saveLocalSession(code, role) {
+  try {
+    localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify({ code, role, savedAt: Date.now() }));
+  } catch (e) {}
+}
+function loadLocalSession() {
+  try {
+    const raw = localStorage.getItem(LOCAL_SESSION_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (Date.now() - data.savedAt > SESSION_MAX_AGE_MS) return null;
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
+function clearLocalSession() {
+  try { localStorage.removeItem(LOCAL_SESSION_KEY); } catch (e) {}
+}
+
+async function resumeAsHost(code) {
+  let data = null;
+  if (typeof window.fbFetchOnce === 'function') {
+    data = await window.fbFetchOnce(code);
+  }
+  if (data && data._lastUpdated && (Date.now() - data._lastUpdated > SESSION_MAX_AGE_MS)) {
+    data = null;
+  }
+  if (data) {
+    Object.assign(state, data);
+  }
+  state.sessionCode = code;
+  state.isHost = true;
+  state.isSpectator = false;
+  state.deviceMode = 'multi';
+  if (!data) {
+    state.screen = 'player-count';
+  }
+  saveLocalSession(code, 'host');
+  render();
 }
 
 /* ---------- Statistik ---------- */
@@ -605,7 +664,9 @@ function render() {
 
   if (state.deviceMode === 'multi' && state.isHost && state.sessionCode && typeof window.fbPushState === 'function') {
     try {
-      window.fbPushState(state.sessionCode, JSON.parse(JSON.stringify(state)));
+      const payload = JSON.parse(JSON.stringify(state));
+      payload._lastUpdated = Date.now();
+      window.fbPushState(state.sessionCode, payload);
     } catch (e) {}
   }
 }
@@ -632,11 +693,19 @@ function renderDeviceMode() {
 }
 
 function renderMultiChoice() {
+  const last = loadLocalSession();
   return `
     <div class="pt-12 pb-6 text-center">
       <button data-action="back-to-device-mode" class="text-sm text-ink/50 mb-4 block">← Zurück</button>
       <h1 class="font-display text-3xl text-pinedark">Multi Device</h1>
     </div>
+    ${last ? `
+      <button data-action="resume-session" data-code="${last.code}" data-role="${last.role}"
+        class="w-full text-left bg-white rounded-2xl border-2 border-gold p-5 mb-4 active:scale-[0.98] transition-transform">
+        <p class="font-display text-2xl text-pinedark mb-1">↻ Letzte Session fortsetzen</p>
+        <p class="text-sm text-ink/60 leading-relaxed">Code ${last.code} · du warst ${last.role === 'host' ? 'Host' : 'Zuschauer'}. Praktisch nach einem versehentlichen Neuladen der Seite.</p>
+      </button>
+    ` : ''}
     <button data-action="host-session"
       class="w-full text-left bg-white rounded-2xl border-2 border-parchment2 p-5 mb-4 active:scale-[0.98] transition-transform">
       <p class="font-display text-2xl text-pinedark mb-1">🎯 Neue Session starten</p>
@@ -728,7 +797,8 @@ function renderPlayerCount() {
   const options = [];
   for (let n = MIN_PLAYERS; n <= MAX_PLAYERS; n++) options.push(n);
   return `
-    <div class="pt-16 pb-10 text-center">
+    <div class="pt-12 pb-10 text-center">
+      <button data-action="back-to-device-mode" class="text-sm text-ink/50 mb-6 block">← Zurück</button>
       <p class="font-display text-gold text-sm tracking-[0.3em] uppercase mb-1">Bogenschießen</p>
       <h1 class="font-display text-5xl text-pinedark mb-2">Archery Arena</h1>
       <p class="text-ink/60 text-sm">Wie viele Spieler / Teams seid ihr?</p>
@@ -1563,6 +1633,7 @@ function attemptJoin(code) {
   state._receivedAnyData = false;
   state.deviceMode = 'multi';
   state.screen = 'spectator-waiting';
+  saveLocalSession(code, 'spectator');
   render();
 
   setTimeout(() => {
@@ -1593,6 +1664,7 @@ function resetToStart() {
   if (typeof window.fbLeaveSession === 'function') {
     try { window.fbLeaveSession(); } catch (e) {}
   }
+  clearLocalSession();
   state.screen = 'device-mode';
   state.deviceMode = null;
   state.isHost = false;
@@ -1666,11 +1738,21 @@ document.getElementById('app').addEventListener('click', (e) => {
     state.screen = 'multi-choice';
     render();
   }
+  if (action === 'resume-session') {
+    const code = target.dataset.code;
+    const role = target.dataset.role;
+    if (role === 'host') {
+      resumeAsHost(code);
+    } else {
+      attemptJoin(code);
+    }
+  }
   if (action === 'host-session') {
     state.isHost = true;
     state.isSpectator = false;
     state.sessionCode = String(1000 + Math.floor(Math.random() * 9000));
     state.screen = 'host-code';
+    saveLocalSession(state.sessionCode, 'host');
     render();
   }
   if (action === 'continue-after-host') {
