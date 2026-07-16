@@ -1768,25 +1768,60 @@ document.getElementById('app').addEventListener('click', (e) => {
   if (!target) return;
   const action = target.dataset.action;
 
-  const ALLOWED_FOR_SPECTATOR = ['leave-session', 'go-home'];
-  if (state.isSpectator && !ALLOWED_FOR_SPECTATOR.includes(action)) return;
+  // Zuschauer dürfen nur den Spielstand ansehen, nicht verändern.
+  // Alles, was nicht das eigentliche Spiel manipuliert (Navigation, Sessions-Verwaltung, Statistik ansehen etc.),
+  // bleibt für Zuschauer immer erlaubt.
+  const SPECTATOR_BLOCKED_ACTIONS = [
+    'hit-cell', 'undo', 'reset', 'select-player',
+    'open-picker', 'close-picker', 'pick-score', 'undo-points', 'reset-points', 'select-round',
+    'draw-lotto', 'pick-lotto-hits', 'undo-lotto', 'reset-lotto', 'select-lotto-round',
+    'pick-null-arrow', 'undo-null', 'reset-null',
+    'tiebreak-answer-points', 'tiebreak-answer-lotto',
+    'toggle-pause', 'switch-game',
+    'select-lotto-variant', 'select-null-start', 'start-game', 'pick-mode',
+  ];
+  if (state.isSpectator && SPECTATOR_BLOCKED_ACTIONS.includes(action)) return;
 
   if (action === 'choose-single') {
+    if (typeof window.fbLeaveSession === 'function') {
+      try { window.fbLeaveSession(); } catch (e) {}
+    }
+    state.isHost = false;
+    state.isSpectator = false;
+    state.sessionCode = null;
     state.deviceMode = 'single';
     state.screen = 'player-count';
     render();
   }
   if (action === 'choose-multi') {
+    if (typeof window.fbLeaveSession === 'function') {
+      try { window.fbLeaveSession(); } catch (e) {}
+    }
+    state.isHost = false;
+    state.isSpectator = false;
+    state.sessionCode = null;
     state.deviceMode = 'multi';
     state.screen = 'multi-choice';
     render();
   }
   if (action === 'back-to-device-mode') {
+    if (typeof window.fbLeaveSession === 'function') {
+      try { window.fbLeaveSession(); } catch (e) {}
+    }
+    state.isHost = false;
+    state.isSpectator = false;
+    state.sessionCode = null;
     state.deviceMode = null;
     state.screen = 'device-mode';
     render();
   }
   if (action === 'back-to-multi-choice') {
+    if (typeof window.fbLeaveSession === 'function') {
+      try { window.fbLeaveSession(); } catch (e) {}
+    }
+    state.isHost = false;
+    state.isSpectator = false;
+    state.sessionCode = null;
     state.joinTimedOut = false;
     state.screen = 'multi-choice';
     render();
