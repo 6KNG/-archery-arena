@@ -319,28 +319,57 @@ function defaultNames(n) {
   return Array.from({ length: n }, (_, i) => `Spieler ${i + 1}`);
 }
 
-/* ---------- Lokale Session-Wiederherstellung (max. 48h) ---------- */
-const LOCAL_SESSION_KEY = 'archeryArenaLastSession_v1';
+/* ---------- Lokale Session-Wiederherstellung: mehrere Sessions (max. 48h) ---------- */
+const LOCAL_SESSIONS_KEY = 'archeryArenaSessions_v1';
 const SESSION_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+const MAX_SAVED_SESSIONS = 12;
+
+function buildSessionLabel() {
+  const parts = [];
+  if (state.mode && GAME_LABELS[state.mode]) parts.push(GAME_LABELS[state.mode].name);
+  if (state.numPlayers) parts.push(`${state.numPlayers} Spieler`);
+  return parts.join(' · ') || 'Neue Session';
+}
+
+function loadAllLocalSessions() {
+  try {
+    const raw = localStorage.getItem(LOCAL_SESSIONS_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(list)) return [];
+    return list
+      .filter(s => Date.now() - s.savedAt <= SESSION_MAX_AGE_MS)
+      .sort((a, b) => b.savedAt - a.savedAt);
+  } catch (e) {
+    return [];
+  }
+}
 
 function saveLocalSession(code, role) {
   try {
-    localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify({ code, role, savedAt: Date.now() }));
+    const list = loadAllLocalSessions();
+    const entry = { code, role, savedAt: Date.now(), label: buildSessionLabel() };
+    const idx = list.findIndex(s => s.code === code);
+    if (idx !== -1) list.splice(idx, 1);
+    list.unshift(entry);
+    localStorage.setItem(LOCAL_SESSIONS_KEY, JSON.stringify(list.slice(0, MAX_SAVED_SESSIONS)));
   } catch (e) {}
 }
-function loadLocalSession() {
+
+function removeLocalSession(code) {
   try {
-    const raw = localStorage.getItem(LOCAL_SESSION_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (Date.now() - data.savedAt > SESSION_MAX_AGE_MS) return null;
-    return data;
-  } catch (e) {
-    return null;
-  }
+    const list = loadAllLocalSessions().filter(s => s.code !== code);
+    localStorage.setItem(LOCAL_SESSIONS_KEY, JSON.stringify(list));
+  } catch (e) {}
 }
-function clearLocalSession() {
-  try { localStorage.removeItem(LOCAL_SESSION_KEY); } catch (e) {}
+
+function timeAgoLabel(ts) {
+  const diffMin = Math.round((Date.now() - ts) / 60000);
+  if (diffMin < 1) return 'gerade eben';
+  if (diffMin < 60) return `vor ${diffMin} Min.`;
+  const diffH = Math.round(diffMin / 60);
+  if (diffH < 24) return `vor ${diffH} Std.`;
+  const diffD = Math.round(diffH / 24);
+  return `vor ${diffD} Tag${diffD === 1 ? '' : 'en'}`;
 }
 
 async function resumeAsHost(code) {
@@ -647,6 +676,7 @@ function render() {
   let inner;
   if (state.screen === 'device-mode') inner = renderDeviceMode();
   else if (state.screen === 'multi-choice') inner = renderMultiChoice();
+  else if (state.screen === 'sessions-list') inner = renderSessionsList();
   else if (state.screen === 'host-code') inner = renderHostCodeScreen();
   else if (state.screen === 'join-code') inner = renderJoinScreen();
   else if (state.screen === 'spectator-waiting') inner = renderSpectatorWaiting();
@@ -693,17 +723,17 @@ function renderDeviceMode() {
 }
 
 function renderMultiChoice() {
-  const last = loadLocalSession();
+  const list = loadAllLocalSessions();
   return `
     <div class="pt-12 pb-6 text-center">
       <button data-action="back-to-device-mode" class="text-sm text-ink/50 mb-4 block">← Zurück</button>
       <h1 class="font-display text-3xl text-pinedark">Multi Device</h1>
     </div>
-    ${last ? `
-      <button data-action="resume-session" data-code="${last.code}" data-role="${last.role}"
+    ${list.length > 0 ? `
+      <button data-action="go-sessions-list"
         class="w-full text-left bg-white rounded-2xl border-2 border-gold p-5 mb-4 active:scale-[0.98] transition-transform">
-        <p class="font-display text-2xl text-pinedark mb-1">↻ Letzte Session fortsetzen</p>
-        <p class="text-sm text-ink/60 leading-relaxed">Code ${last.code} · du warst ${last.role === 'host' ? 'Host' : 'Zuschauer'}. Praktisch nach einem versehentlichen Neuladen der Seite.</p>
+        <p class="font-display text-2xl text-pinedark mb-1">📂 Meine Sessions (${list.length})</p>
+        <p class="text-sm text-ink/60 leading-relaxed">Frühere Sessions ansehen und fortsetzen – z. B. wenn eine Gruppe zwischendurch pausiert hat.</p>
       </button>
     ` : ''}
     <button data-action="host-session"
@@ -728,6 +758,29 @@ function joinUrlForCode(code) {
 }
 function qrImageUrl(data) {
   return `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(data)}`;
+}
+
+function renderSessionsList() {
+  const list = loadAllLocalSessions();
+  return `
+    <div class="pt-12 pb-6 text-center">
+      <button data-action="back-to-multi-choice" class="text-sm text-ink/50 mb-4 block">← Zurück</button>
+      <h1 class="font-display text-3xl text-pinedark mb-2">Meine Sessions</h1>
+      <p class="text-sm text-ink/60">Zuletzt genutzte Sessions auf diesem Gerät (max. 48h gespeichert)</p>
+    </div>
+    ${list.length === 0 ? `
+      <p class="text-center text-sm text-ink/50 mt-10">Keine gespeicherten Sessions gefunden.</p>
+    ` : list.map(s => `
+      <div class="bg-white rounded-2xl border-2 border-parchment2 p-4 mb-3 flex items-center justify-between gap-3">
+        <button data-action="resume-session" data-code="${s.code}" data-role="${s.role}" class="text-left flex-1 active:scale-[0.98] transition-transform">
+          <p class="font-display text-xl text-pinedark">Code ${s.code}</p>
+          <p class="text-xs text-ink/50 mt-0.5">${escapeHtml(s.label || 'Session')} · ${s.role === 'host' ? '🎯 Host' : '👁 Zuschauer'} · ${timeAgoLabel(s.savedAt)}</p>
+        </button>
+        <button data-action="remove-session" data-code="${s.code}"
+          class="h-9 w-9 rounded-lg border-2 border-ink/15 text-ink/40 flex items-center justify-center shrink-0">🗑</button>
+      </div>
+    `).join('')}
+  `;
 }
 
 function renderHostCodeScreen() {
@@ -1652,6 +1705,7 @@ function attemptJoin(code) {
     state.sessionCode = code;
     state.deviceMode = 'multi';
     state.joinTimedOut = false;
+    saveLocalSession(code, 'spectator');
     const liveScreens = ['game-tree', 'game-points', 'game-lotto', 'game-null'];
     if (!liveScreens.includes(state.screen)) {
       state.screen = 'spectator-waiting';
@@ -1664,7 +1718,6 @@ function resetToStart() {
   if (typeof window.fbLeaveSession === 'function') {
     try { window.fbLeaveSession(); } catch (e) {}
   }
-  clearLocalSession();
   state.screen = 'device-mode';
   state.deviceMode = null;
   state.isHost = false;
@@ -1746,6 +1799,14 @@ document.getElementById('app').addEventListener('click', (e) => {
     } else {
       attemptJoin(code);
     }
+  }
+  if (action === 'go-sessions-list') {
+    state.screen = 'sessions-list';
+    render();
+  }
+  if (action === 'remove-session') {
+    removeLocalSession(target.dataset.code);
+    render();
   }
   if (action === 'host-session') {
     state.isHost = true;
