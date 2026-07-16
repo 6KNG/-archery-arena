@@ -372,11 +372,26 @@ function timeAgoLabel(ts) {
   return `vor ${diffD} Tag${diffD === 1 ? '' : 'en'}`;
 }
 
+let sessionOpToken = 0;
+let resumingCode = null;
+
 async function resumeAsHost(code) {
+  if (resumingCode) return; // schon eine Anfrage aktiv - erst abwarten
+  resumingCode = code;
+  const myToken = ++sessionOpToken;
+  render();
+
   let data = null;
   if (typeof window.fbFetchOnce === 'function') {
     data = await window.fbFetchOnce(code);
   }
+
+  if (myToken !== sessionOpToken) {
+    // eine neuere Anfrage hat diese überholt - Ergebnis verwerfen
+    resumingCode = null;
+    return;
+  }
+
   if (data && data._lastUpdated && (Date.now() - data._lastUpdated > SESSION_MAX_AGE_MS)) {
     data = null;
   }
@@ -391,6 +406,7 @@ async function resumeAsHost(code) {
     state.screen = 'player-count';
   }
   saveLocalSession(code, 'host');
+  resumingCode = null;
   render();
 }
 
@@ -770,16 +786,21 @@ function renderSessionsList() {
     </div>
     ${list.length === 0 ? `
       <p class="text-center text-sm text-ink/50 mt-10">Keine gespeicherten Sessions gefunden.</p>
-    ` : list.map(s => `
-      <div class="bg-white rounded-2xl border-2 border-parchment2 p-4 mb-3 flex items-center justify-between gap-3">
-        <button data-action="resume-session" data-code="${s.code}" data-role="${s.role}" class="text-left flex-1 active:scale-[0.98] transition-transform">
-          <p class="font-display text-xl text-pinedark">Code ${s.code}</p>
+    ` : list.map(s => {
+      const isLoading = resumingCode === s.code;
+      const disabled = resumingCode !== null;
+      return `
+      <div class="bg-white rounded-2xl border-2 ${isLoading ? 'border-gold' : 'border-parchment2'} p-4 mb-3 flex items-center justify-between gap-3">
+        <button data-action="resume-session" data-code="${s.code}" data-role="${s.role}" ${disabled ? 'disabled' : ''}
+          class="text-left flex-1 active:scale-[0.98] transition-transform ${disabled && !isLoading ? 'opacity-40' : ''}">
+          <p class="font-display text-xl text-pinedark">Code ${s.code}${isLoading ? ' · lädt...' : ''}</p>
           <p class="text-xs text-ink/50 mt-0.5">${escapeHtml(s.label || 'Session')} · ${s.role === 'host' ? '🎯 Host' : '👁 Zuschauer'} · ${timeAgoLabel(s.savedAt)}</p>
         </button>
-        <button data-action="remove-session" data-code="${s.code}"
-          class="h-9 w-9 rounded-lg border-2 border-ink/15 text-ink/40 flex items-center justify-center shrink-0">🗑</button>
+        <button data-action="remove-session" data-code="${s.code}" ${disabled ? 'disabled' : ''}
+          class="h-9 w-9 rounded-lg border-2 border-ink/15 text-ink/40 flex items-center justify-center shrink-0 ${disabled ? 'opacity-40' : ''}">🗑</button>
       </div>
-    `).join('')}
+    `;
+    }).join('')}
   `;
 }
 
@@ -1666,6 +1687,8 @@ function escapeHtml(str) {
 }
 
 function attemptJoin(code) {
+  const myToken = ++sessionOpToken;
+
   if (typeof window.fbJoinSession !== 'function' || !window.fbConfigured) {
     state.deviceMode = 'multi';
     state.screen = 'join-code';
@@ -1690,6 +1713,7 @@ function attemptJoin(code) {
   render();
 
   setTimeout(() => {
+    if (myToken !== sessionOpToken) return; // überholt durch neuere Auswahl
     if (state.screen === 'spectator-waiting' && !state._receivedAnyData) {
       state.joinTimedOut = true;
       render();
@@ -1697,6 +1721,7 @@ function attemptJoin(code) {
   }, 6000);
 
   window.fbJoinSession(code, (data) => {
+    if (myToken !== sessionOpToken) return; // überholt durch neuere Auswahl
     if (!data) return;
     state._receivedAnyData = true;
     Object.assign(state, data);
@@ -1827,6 +1852,7 @@ document.getElementById('app').addEventListener('click', (e) => {
     render();
   }
   if (action === 'resume-session') {
+    if (resumingCode) return;
     const code = target.dataset.code;
     const role = target.dataset.role;
     if (role === 'host') {
@@ -1840,6 +1866,7 @@ document.getElementById('app').addEventListener('click', (e) => {
     render();
   }
   if (action === 'remove-session') {
+    if (resumingCode) return;
     removeLocalSession(target.dataset.code);
     render();
   }
