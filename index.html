@@ -347,8 +347,9 @@ function loadAllLocalSessions() {
 function saveLocalSession(code, role) {
   try {
     const list = loadAllLocalSessions();
-    const entry = { code, role, savedAt: Date.now(), label: buildSessionLabel() };
     const idx = list.findIndex(s => s.code === code);
+    const createdAt = idx !== -1 && list[idx].createdAt ? list[idx].createdAt : Date.now();
+    const entry = { code, role, savedAt: Date.now(), createdAt, label: buildSessionLabel() };
     if (idx !== -1) list.splice(idx, 1);
     list.unshift(entry);
     localStorage.setItem(LOCAL_SESSIONS_KEY, JSON.stringify(list.slice(0, MAX_SAVED_SESSIONS)));
@@ -370,6 +371,13 @@ function timeAgoLabel(ts) {
   if (diffH < 24) return `vor ${diffH} Std.`;
   const diffD = Math.round(diffH / 24);
   return `vor ${diffD} Tag${diffD === 1 ? '' : 'en'}`;
+}
+
+function formatDateTime(ts) {
+  const d = new Date(ts);
+  const datePart = d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const timePart = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  return `${datePart}, ${timePart} Uhr`;
 }
 
 let sessionOpToken = 0;
@@ -713,6 +721,7 @@ function render() {
       const payload = JSON.parse(JSON.stringify(state));
       payload._lastUpdated = Date.now();
       window.fbPushState(state.sessionCode, payload);
+      saveLocalSession(state.sessionCode, 'host');
     } catch (e) {}
   }
 }
@@ -794,7 +803,8 @@ function renderSessionsList() {
         <button data-action="resume-session" data-code="${s.code}" data-role="${s.role}" ${disabled ? 'disabled' : ''}
           class="text-left flex-1 active:scale-[0.98] transition-transform ${disabled && !isLoading ? 'opacity-40' : ''}">
           <p class="font-display text-xl text-pinedark">Code ${s.code}${isLoading ? ' · lädt...' : ''}</p>
-          <p class="text-xs text-ink/50 mt-0.5">${escapeHtml(s.label || 'Session')} · ${s.role === 'host' ? '🎯 Host' : '👁 Zuschauer'} · ${timeAgoLabel(s.savedAt)}</p>
+          <p class="text-xs text-ink/50 mt-0.5">${escapeHtml(s.label || 'Session')} · ${s.role === 'host' ? '🎯 Host' : '👁 Zuschauer'}</p>
+          <p class="text-[11px] text-ink/40 mt-0.5">Gestartet: ${formatDateTime(s.createdAt || s.savedAt)} · zuletzt aktiv ${timeAgoLabel(s.savedAt)}</p>
         </button>
         <button data-action="remove-session" data-code="${s.code}" ${disabled ? 'disabled' : ''}
           class="h-9 w-9 rounded-lg border-2 border-ink/15 text-ink/40 flex items-center justify-center shrink-0 ${disabled ? 'opacity-40' : ''}">🗑</button>
