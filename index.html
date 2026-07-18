@@ -334,6 +334,23 @@ function defaultNames(n) {
   return Array.from({ length: n }, (_, i) => `Spieler ${i + 1}`);
 }
 
+/* ---------- Dauerhafte Nutzer-Anlage (Vorname, Nachname, Arena-Name) ---------- */
+const USER_PROFILES_KEY = 'archeryArenaUserProfiles_v1';
+
+function loadUserProfiles() {
+  try {
+    const raw = localStorage.getItem(USER_PROFILES_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveUserProfiles(list) {
+  try { localStorage.setItem(USER_PROFILES_KEY, JSON.stringify(list)); } catch (e) {}
+}
+
 /* ---------- Lokale Session-Wiederherstellung: mehrere Sessions (max. 48h) ---------- */
 const LOCAL_SESSIONS_KEY = 'archeryArenaSessions_v1';
 const SESSION_MAX_AGE_MS = 48 * 60 * 60 * 1000;
@@ -497,6 +514,8 @@ let state = {
   joinTimedOut: false,
   _receivedAnyData: false,
   prefillJoinCode: null,
+  editingUserId: null,
+  userPickerForIndex: null,
 
   numPlayers: 2,
   mode: null,
@@ -715,6 +734,8 @@ function render() {
   let inner;
   if (state.screen === 'device-mode') inner = renderDeviceMode();
   else if (state.screen === 'multi-choice') inner = renderMultiChoice();
+  else if (state.screen === 'user-management') inner = renderUserManagement();
+  else if (state.screen === 'user-edit') inner = renderUserEdit();
   else if (state.screen === 'sessions-list') inner = renderSessionsList();
   else if (state.screen === 'host-code') inner = renderHostCodeScreen();
   else if (state.screen === 'join-code') inner = renderJoinScreen();
@@ -760,9 +781,80 @@ function renderDeviceMode() {
       <p class="font-display text-2xl text-pinedark mb-1">🌐 Multi Device</p>
       <p class="text-sm text-ink/60 leading-relaxed">Ein Gerät führt das Spiel, alle anderen sehen den Stand live mit – über einen gemeinsamen Code.</p>
     </button>
+    <button data-action="go-user-management"
+      class="w-full text-left bg-white rounded-2xl border-2 border-parchment2 p-4 mt-4 active:scale-[0.98] transition-transform">
+      <p class="font-display text-lg text-pinedark">👤 Nutzer verwalten</p>
+      <p class="text-xs text-ink/50 leading-relaxed">Namen einmal anlegen, bei jedem Spiel schnell auswählen.</p>
+    </button>
     <a href="mailto:nguyengiakai@gmail.com?subject=Archery%20Arena%20Feedback" class="block text-center text-xs text-ink/30 mt-6">
       ✉️ Feedback
     </a>
+  `;
+}
+
+function renderUserManagement() {
+  const profiles = loadUserProfiles();
+  return `
+    <div class="pt-12 pb-6 text-center">
+      <button data-action="back-to-device-mode" class="text-sm text-ink/50 mb-4 block">← Zurück</button>
+      <h1 class="font-display text-3xl text-pinedark mb-2">👤 Nutzer verwalten</h1>
+      <p class="text-sm text-ink/60">Einmal anlegen, bei jedem Spiel schnell auswählen</p>
+    </div>
+    <button data-action="new-user"
+      class="w-full h-13 py-3 mb-4 rounded-xl bg-pine text-parchment font-display text-lg tracking-wide active:scale-[0.98] transition-transform">
+      + Neuer Nutzer
+    </button>
+    ${profiles.length === 0 ? `
+      <p class="text-center text-sm text-ink/50 mt-8">Noch keine Nutzer angelegt.</p>
+    ` : profiles.map(p => `
+      <div class="bg-white rounded-2xl border-2 border-parchment2 p-4 mb-3 flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <p class="font-display text-lg text-pinedark truncate">${escapeHtml(p.nickname || '–')}</p>
+          <p class="text-xs text-ink/50 truncate">${escapeHtml(p.firstName)} ${escapeHtml(p.lastName)}</p>
+        </div>
+        <div class="flex gap-2 shrink-0">
+          <button data-action="edit-user" data-user-id="${p.id}" class="h-9 w-9 rounded-lg border-2 border-ink/15 flex items-center justify-center">✏️</button>
+          <button data-action="delete-user" data-user-id="${p.id}" class="h-9 w-9 rounded-lg border-2 border-ink/15 text-ink/40 flex items-center justify-center">🗑</button>
+        </div>
+      </div>
+    `).join('')}
+  `;
+}
+
+function renderUserEdit() {
+  const editing = state.editingUserId ? loadUserProfiles().find(p => p.id === state.editingUserId) : null;
+  return `
+    <div class="pt-12 pb-6 text-center">
+      <button data-action="cancel-user-edit" class="text-sm text-ink/50 mb-4 block">← Zurück</button>
+      <h1 class="font-display text-3xl text-pinedark mb-2">${editing ? 'Nutzer bearbeiten' : 'Neuer Nutzer'}</h1>
+    </div>
+    <div class="bg-white rounded-2xl border border-parchment2 shadow-sm p-6">
+      <label class="block mb-4">
+        <span class="text-sm font-medium text-ink/70 mb-1 block">Vorname</span>
+        <input type="text" id="user-firstname-input" value="${editing ? escapeHtml(editing.firstName) : ''}"
+          class="w-full h-12 px-4 rounded-xl border-2 border-parchment2 focus:border-gold outline-none text-base font-medium" maxlength="30">
+      </label>
+      <label class="block mb-4">
+        <span class="text-sm font-medium text-ink/70 mb-1 block">Nachname</span>
+        <input type="text" id="user-lastname-input" value="${editing ? escapeHtml(editing.lastName) : ''}"
+          class="w-full h-12 px-4 rounded-xl border-2 border-parchment2 focus:border-gold outline-none text-base font-medium" maxlength="30">
+      </label>
+      <label class="block mb-6">
+        <span class="text-sm font-medium text-ink/70 mb-1 block">Arena-Name (Anzeigename im Spiel)</span>
+        <input type="text" id="user-nickname-input" value="${editing ? escapeHtml(editing.nickname) : ''}"
+          class="w-full h-12 px-4 rounded-xl border-2 border-gold/40 focus:border-gold outline-none text-base font-medium" maxlength="24" placeholder="z. B. Falkenauge">
+      </label>
+      <button data-action="save-user"
+        class="w-full h-13 py-3 rounded-xl bg-pine text-parchment font-display text-lg tracking-wide active:scale-[0.98] transition-transform mb-3">
+        Speichern
+      </button>
+      ${editing ? `
+        <button data-action="delete-user" data-user-id="${editing.id}"
+          class="w-full h-11 rounded-xl border-2 border-ink/15 text-ink/50 font-medium text-sm">
+          Nutzer löschen
+        </button>
+      ` : ''}
+    </div>
   `;
 }
 
@@ -983,9 +1075,13 @@ function renderSetup() {
         return `
           <label class="block mb-4">
             <span class="text-sm font-medium text-ink/70 mb-1 block">Spieler / Team ${i + 1}</span>
-            <input type="text" data-player-input="${i}" value="${escapeHtml(name)}"
-              class="w-full h-12 px-4 rounded-xl border-2 border-${c.light} focus:border-${c.name} outline-none text-base font-medium"
-              placeholder="Name eingeben" maxlength="24">
+            <div class="flex gap-2">
+              <input type="text" data-player-input="${i}" value="${escapeHtml(name)}"
+                class="flex-1 h-12 px-4 rounded-xl border-2 border-${c.light} focus:border-${c.name} outline-none text-base font-medium"
+                placeholder="Name eingeben" maxlength="24">
+              <button type="button" data-action="open-user-picker" data-idx="${i}"
+                class="h-12 w-12 rounded-xl border-2 border-${c.light} text-${c.name} flex items-center justify-center shrink-0" title="Aus Nutzerliste wählen">👤</button>
+            </div>
           </label>
         `;
       }).join('')}
@@ -1054,6 +1150,34 @@ function renderSetup() {
         class="w-full h-13 py-3 rounded-xl bg-pine text-parchment font-display text-lg tracking-wide active:scale-[0.98] transition-transform">
         Spiel starten
       </button>
+    </div>
+    ${renderUserPickerOverlay()}
+  `;
+}
+
+function renderUserPickerOverlay() {
+  if (state.userPickerForIndex === null) return '';
+  const idx = state.userPickerForIndex;
+  const profiles = loadUserProfiles();
+  return `
+    <div data-action="close-user-picker" class="fixed inset-0 z-50 flex items-end justify-center" style="background:rgba(15,42,31,0.55);">
+      <div class="w-full max-w-md bg-white rounded-t-3xl p-5 pb-8 pop-in" style="max-height:70vh;overflow-y:auto;">
+        <div class="w-10 h-1.5 bg-parchment2 rounded-full mx-auto mb-4"></div>
+        <p class="text-center font-display text-lg text-pinedark mb-4">Spieler auswählen</p>
+        ${profiles.length === 0 ? `
+          <p class="text-center text-sm text-ink/50 mb-2">Noch keine gespeicherten Nutzer.</p>
+          <p class="text-center text-xs text-ink/40 mb-4">Lege welche im Startmenü unter „👤 Nutzer verwalten" an.</p>
+        ` : profiles.map(p => `
+          <button data-action="pick-user-for-slot" data-user-id="${p.id}" data-idx="${idx}"
+            class="w-full text-left bg-parchment rounded-xl px-4 py-3 mb-2 active:scale-[0.98] transition-transform">
+            <p class="font-display text-lg text-pinedark">${escapeHtml(p.nickname || (p.firstName + ' ' + p.lastName))}</p>
+            <p class="text-xs text-ink/50">${escapeHtml(p.firstName)} ${escapeHtml(p.lastName)}</p>
+          </button>
+        `).join('')}
+        <button data-action="close-user-picker" class="w-full h-12 mt-2 rounded-xl border-2 border-ink/15 text-ink/50 font-display">
+          Schließen
+        </button>
+      </div>
     </div>
   `;
 }
@@ -1779,6 +1903,8 @@ function resetToStart() {
   state.sessionCode = null;
   state.joinTimedOut = false;
   state._receivedAnyData = false;
+  state.editingUserId = null;
+  state.userPickerForIndex = null;
   state.numPlayers = 2;
   state.mode = null;
   state.playerNames = defaultNames(2);
@@ -1866,9 +1992,79 @@ document.getElementById('app').addEventListener('click', (e) => {
     state.isSpectator = false;
     state.sessionCode = null;
     state.deviceMode = null;
+    state.editingUserId = null;
     state.screen = 'device-mode';
     render();
   }
+
+  /* --- Nutzerverwaltung --- */
+  if (action === 'go-user-management') {
+    state.screen = 'user-management';
+    render();
+  }
+  if (action === 'new-user') {
+    state.editingUserId = null;
+    state.screen = 'user-edit';
+    render();
+  }
+  if (action === 'edit-user') {
+    state.editingUserId = target.dataset.userId;
+    state.screen = 'user-edit';
+    render();
+  }
+  if (action === 'cancel-user-edit') {
+    state.editingUserId = null;
+    state.screen = 'user-management';
+    render();
+  }
+  if (action === 'save-user') {
+    const firstName = document.getElementById('user-firstname-input').value.trim();
+    const lastName = document.getElementById('user-lastname-input').value.trim();
+    const nickname = document.getElementById('user-nickname-input').value.trim();
+    if (!firstName && !lastName && !nickname) return;
+    const profiles = loadUserProfiles();
+    if (state.editingUserId) {
+      const idx = profiles.findIndex(p => p.id === state.editingUserId);
+      if (idx !== -1) profiles[idx] = { ...profiles[idx], firstName, lastName, nickname };
+    } else {
+      profiles.push({ id: 'u' + Date.now() + Math.floor(Math.random() * 1000), firstName, lastName, nickname });
+    }
+    saveUserProfiles(profiles);
+    state.editingUserId = null;
+    state.screen = 'user-management';
+    render();
+  }
+  if (action === 'delete-user') {
+    const userId = target.dataset.userId;
+    if (confirm('Diesen Nutzer wirklich löschen?')) {
+      const profiles = loadUserProfiles().filter(p => p.id !== userId);
+      saveUserProfiles(profiles);
+      state.editingUserId = null;
+      state.screen = 'user-management';
+      render();
+    }
+  }
+  if (action === 'open-user-picker') {
+    syncPlayerNamesFromInputs();
+    state.userPickerForIndex = parseInt(target.dataset.idx, 10);
+    render();
+  }
+  if (action === 'close-user-picker') {
+    state.userPickerForIndex = null;
+    render();
+  }
+  if (action === 'pick-user-for-slot') {
+    syncPlayerNamesFromInputs();
+    const idx = parseInt(target.dataset.idx, 10);
+    const userId = target.dataset.userId;
+    const profile = loadUserProfiles().find(p => p.id === userId);
+    if (profile) {
+      state.playerNames[idx] = profile.nickname || (profile.firstName + ' ' + profile.lastName) || `Spieler ${idx + 1}`;
+    }
+    state.userPickerForIndex = null;
+    render();
+  }
+
   if (action === 'back-to-multi-choice') {
     if (typeof window.fbLeaveSession === 'function') {
       try { window.fbLeaveSession(); } catch (e) {}
