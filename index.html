@@ -1,9 +1,18 @@
 <!DOCTYPE html>
+<!--
+  Archery Arena
+  © 2026 Kai Nguyen Gia. Alle Rechte vorbehalten.
+  Dieses Programm (Quellcode, Konzept und Inhalte) wurde von Kai Nguyen Gia erstellt
+  und ist sein geistiges Eigentum. Jede Vervielfältigung, Verbreitung oder Nutzung
+  ohne ausdrückliche Zustimmung des Urhebers ist nicht gestattet.
+-->
 <html lang="de">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Archery Arena</title>
+<meta name="author" content="Kai Nguyen Gia">
+<meta name="copyright" content="© 2026 Kai Nguyen Gia. Alle Rechte vorbehalten.">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Archery Arena">
@@ -22,7 +31,7 @@
           pinedark: '#0F2A1F',
           parchment: '#F3EFE1',
           parchment2: '#EAE3CE',
-          gold: '#C98A2B',
+          gold: '#6B7B3D',
           ink: '#2B2A25',
           player1: '#C9622B', player1light: '#F0D9C9',
           player2: '#2D6E8E', player2light: '#D2E4EC',
@@ -107,10 +116,14 @@
     100% { transform: scale(1) rotate(0deg); opacity: 1; }
   }
   .tree-dim { opacity: 0.45; }
-  ::selection { background: #C98A2B33; }
+  ::selection { background: #6B7B3D33; }
 </style>
 </head>
 <body class="min-h-screen">
+
+<span aria-hidden="true" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">
+  Archery Arena – Software und Konzept von Kai Nguyen Gia. © 2026 Kai Nguyen Gia. Alle Rechte vorbehalten.
+</span>
 
 <div id="app" class="max-w-2xl mx-auto px-4 pb-10"></div>
 
@@ -744,6 +757,9 @@ function renderDeviceMode() {
       <p class="font-display text-2xl text-pinedark mb-1">🌐 Multi Device</p>
       <p class="text-sm text-ink/60 leading-relaxed">Ein Gerät führt das Spiel, alle anderen sehen den Stand live mit – über einen gemeinsamen Code.</p>
     </button>
+    <a href="mailto:nguyengiakai@gmail.com?subject=Archery%20Arena%20Feedback" class="block text-center text-xs text-ink/30 mt-6">
+      ✉️ Feedback
+    </a>
   `;
 }
 
